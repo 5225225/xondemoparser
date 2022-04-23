@@ -53,7 +53,7 @@ trait BufExt: bytes::Buf {
         let y = self.get_f32();
         let z = self.get_f32();
 
-        Vector { x, y, z,}
+        Vector { x, y, z }
     }
 }
 
@@ -61,7 +61,10 @@ impl<T> BufExt for T where T: bytes::Buf {}
 
 impl Parser {
     fn new(buf: Vec<u8>) -> Self {
-        Self { buf: buf.into(), downloaded_data: Vec::new() }
+        Self {
+            buf: buf.into(),
+            downloaded_data: Vec::new(),
+        }
     }
 
     fn parse_header(&mut self) -> String {
@@ -200,13 +203,13 @@ impl Entity {
             frame2,
             model2,
         }
-
     }
 }
 
 impl Packet {
     /// Yields None on EOF
     fn read_command(&mut self) -> Option<Command> {
+        dbg!(self.buf.remaining());
         if self.buf.remaining() == 0 {
             return None;
         }
@@ -218,7 +221,9 @@ impl Packet {
         }
 
         if cmd & 0b1000_0000 != 0 {
-            return Some(Command::Entity { entity: Entity::parse(u32::from(cmd & 0b0111_1111), &mut self.buf)});
+            return Some(Command::Entity {
+                entity: Entity::parse(u32::from(cmd & 0b0111_1111), &mut self.buf),
+            });
         }
 
         Some(match cmd {
@@ -299,7 +304,10 @@ impl Packet {
                 let atten = self.buf.get_u8();
 
                 Command::SpawnStaticSound2 {
-                    org, sound, vol, atten,
+                    org,
+                    sound,
+                    vol,
+                    atten,
                 }
             }
             _ => self.buf.bail_dump(&format!("unknown command number {cmd}")),
@@ -334,7 +342,7 @@ fn parse_temp_entity(buf: &mut bytes::Bytes) -> TempEntity {
                         name,
                         time,
                     }
-                },
+                }
                 8 => {
                     // RACE_NET_SERVER_RECORD
                     let time = u32::try_from(buf.get_uint_le(3)).unwrap();
@@ -345,26 +353,20 @@ fn parse_temp_entity(buf: &mut bytes::Bytes) -> TempEntity {
                     let speed = u32::try_from(buf.get_uint_le(3)).unwrap();
                     let holder = buf.get_zstring();
 
-                    TempEntity::SpeedAward {
-                        speed,
-                        holder,
-                    }
+                    TempEntity::SpeedAward { speed, holder }
                 }
                 1 => {
                     // RACE_NET_CHECKPOINT_CLEAR
                     // no arguments!
                     TempEntity::RaceCheckpointClear
-                },
+                }
                 10 => {
                     // RACE_NET_SPEED_AWARD_BEST
                     let speed = u32::try_from(buf.get_uint_le(3)).unwrap();
                     let holder = buf.get_zstring();
 
-                    TempEntity::BestSpeedAward {
-                        speed,
-                        holder,
-                    }
-                },
+                    TempEntity::BestSpeedAward { speed, holder }
+                }
                 15 => {
                     // RACE_NET_RANKINGS_CNT
                     let count = buf.get_u8();
@@ -373,7 +375,11 @@ fn parse_temp_entity(buf: &mut bytes::Bytes) -> TempEntity {
                 _ => buf.bail_dump(&format!("unknown temp entity 86 type {ty}")),
             }
         }
-        _ => buf.bail_dump(&format!("unknown tempentity type {ty}")),
+        0x63 => {
+            buf.advance(5);
+            TempEntity::UnknownNintyNine
+        }
+        _ => buf.bail_dump(&format!("unknown tempentity type {ty:#X}")),
     }
 }
 
@@ -401,6 +407,7 @@ enum TempEntity {
     RankingsCount {
         count: u8,
     },
+    UnknownNintyNine,
 }
 
 #[derive(Clone, Debug)]
@@ -598,7 +605,10 @@ mod tests {
                     }
                     Command::StuffText { text } if text.contains("cl_downloadfinished") => {
                         println!("Dumping downloaded data to prog.dat");
-                        std::fs::File::create("/home/jess/src/xondemoparser/prog.dat").unwrap().write_all(&p.downloaded_data).unwrap();
+                        std::fs::File::create("/home/jess/src/xondemoparser/prog.dat")
+                            .unwrap()
+                            .write_all(&p.downloaded_data)
+                            .unwrap();
                     }
                     other => drop(dbg!(&other)),
                 }
