@@ -55,7 +55,68 @@ trait BufExt: bytes::Buf {
 
         Vector { x, y, z }
     }
+
+    fn get_angle_i16(&mut self) -> Angles {
+        let a = self.get_i16_le();
+        let b = self.get_i16_le();
+        let c = self.get_i16_le();
+
+        Angles { a, b, c }
+    }
 }
+
+#[derive(Clone, Debug)]
+struct Angles {
+    a: i16,
+    b: i16,
+    c: i16,
+}
+
+#[derive(Clone, Debug)]
+struct ClientData {
+}
+
+impl ClientData {
+    fn get_from(buf: &mut bytes::Bytes) -> Self {
+const VIEWZOOM : u32 = 1 << 19;
+const ITEMS : u32 = 1 << 9;
+const VELOCITY1 : u32 = 1 << 5;
+const PUNCHVEC1 : u32 = 1 << 16;
+const PUNCH1 : u32 = 1 << 2;
+const IDEALPITCH : u32 = 1 << 1;
+const VIEWHEIGHT : u32 = 1 << 0;
+const EXTEND2 : u32 = 1 << 23;
+const EXTEND1 : u32 = 1 << 15;
+
+
+        let mut bits: u32 = u32::from(buf.get_u16_le());
+        if bits & EXTEND1 != 0 {
+            bits |= u32::from(buf.get_u8()) << 16;
+
+            if bits & EXTEND2 != 0 {
+                bits |= u32::from(buf.get_u8()) << 24;
+            }
+        }
+
+
+        let model_index = (bits & VIEWHEIGHT != 0).then(|| buf.get_u8());
+        let model_index = (bits & IDEALPITCH != 0).then(|| buf.get_u8());
+
+        for i in 0..3 {
+            (bits & PUNCH1 << i != 0).then(|| buf.get_u16_le());
+            (bits & PUNCHVEC1 << i != 0).then(|| buf.get_u16_le());
+            (bits & VELOCITY1 << i != 0).then(|| buf.get_u16_le());
+        }
+
+        (bits & ITEMS != 0).then(|| buf.get_u32_le());
+        (bits & VIEWZOOM != 0).then(|| buf.get_u16_le());
+
+        // todo idk actually use these values :3
+
+        ClientData { }
+    }
+}
+
 
 impl<T> BufExt for T where T: bytes::Buf {}
 
@@ -215,6 +276,7 @@ impl Packet {
         }
 
         let cmd = self.buf.get_u8();
+        dbg!(cmd);
         if cmd == 0xff {
             // uhh the original code says -1 but this looks to be a signed number? idk.
             return None;
@@ -227,6 +289,66 @@ impl Packet {
         }
 
         Some(match cmd {
+            58 => {
+                // CSQC_ENTITIES
+                // fuck it, skip this shit
+
+                // TODO: we can't actually skip this.
+                let mut entities = Vec::new();
+                loop {
+                    let entity = self.buf.get_u16_le();
+                    if entity == 0 {
+                        break;
+                    }
+                    entities.push(entity);
+                }
+
+                Command::CSQCEntities { entities }
+            }
+            15 => {
+                let data = ClientData::get_from(&mut self.buf);
+                Command::ClientData { data }
+            }
+            7 => {
+                // TIME
+                let time = self.buf.get_f32();
+                Command::Time { time }
+            }
+            13 => {
+                // UPDATENAME
+                let i = self.buf.get_u8();
+                let name = self.buf.get_zstring();
+                Command::UpdateName { i, name }
+            }
+            14 => {
+                let i = self.buf.get_u8();
+                let frags = self.buf.get_u16_le();
+                Command::UpdateFrags {i, frags}
+            }
+            17 => {
+                let i = self.buf.get_u8();
+                let colors = self.buf.get_u8();
+                Command::UpdateColors {i, colors}
+            }
+            12 => {
+                let i = self.buf.get_u8();
+                let style = self.buf.get_zstring();
+                Command::LightStyle { i, style }
+            }
+            3 => {
+                let i = self.buf.get_u8();
+                let value = self.buf.get_u32_le();
+                Command::UpdateStat { i, value }
+            }
+            10 => {
+                // SETANGLE
+                let angles = self.buf.get_angle_i16();
+                // the format here depends on the protocol
+                // but assume we're DARKPLACES7 for now, which means angles are 16 bit
+                Command::SetAngle {
+                    angles,
+                }
+            }
             9 => {
                 let text = self.buf.get_zstring();
                 Command::StuffText { text }
@@ -247,7 +369,7 @@ impl Packet {
             }
             11 => {
                 let protocol = self.buf.get_u32_le();
-                // assert_eq!(protocol, 3504); // PROTOCOL_DARKPLACES7
+                assert_eq!(protocol, 3504); // PROTOCOL_DARKPLACES7
                 let maxclients = self.buf.get_u8();
                 let gametype = self.buf.get_u8();
                 let world_message = self.buf.get_zstring();
@@ -297,7 +419,7 @@ impl Packet {
             23 => Command::TempEntity {
                 inner: parse_temp_entity(&mut self.buf),
             },
-            SPAWNSTATICSOUND2 => {
+            59 => {
                 let org = self.buf.get_vector();
                 let sound = self.buf.get_u16_le();
                 let vol = self.buf.get_u8();
@@ -412,8 +534,37 @@ enum TempEntity {
 
 #[derive(Clone, Debug)]
 enum Command {
+    CSQCEntities { entities: Vec<u16> },
+    ClientData { data: ClientData },
     StuffText {
         text: String,
+    },
+    Time { time: f32, } ,
+    UpdateName {
+        i: u8,
+        name: String,},
+    
+    UpdateFrags {
+        i: u8,
+        frags: u16,
+    },
+
+    UpdateColors {
+        i: u8,
+        colors: u8,
+    },
+
+    LightStyle {
+        i: u8,
+        style: String,},
+
+    UpdateStat {
+        i: u8,
+        value: u32,
+    },
+
+    SetAngle {
+        angles: Angles,
     },
 
     DownloadData {
