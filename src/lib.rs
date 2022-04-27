@@ -290,6 +290,7 @@ impl Packet {
 
         Some(match cmd {
             58 => {
+                self.buf.bail_dump("oh shit");
                 // CSQC_ENTITIES
                 // fuck it, skip this shit
 
